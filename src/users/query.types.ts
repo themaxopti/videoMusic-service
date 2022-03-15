@@ -17,3 +17,25 @@ export interface LoginResponse {
 export interface ActiveParams {
     link:string
 }
+
+export interface AuthParams {
+    userId:number
+}
+
+export interface AuthResponse {
+    id:number
+    email:string
+    is_active:boolean
+    subscribers_count:number
+    activate_link:string
+    name:string
+}
+
+export interface RefreshParams {
+    refreshToken:string
+}
+
+export interface RefreshResponse {
+    accessToken:string
+}
+

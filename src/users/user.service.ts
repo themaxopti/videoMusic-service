@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { UserDto } from "./user.dto"
 import db from '../db'
 import { ApiError } from "../exceptions/api-error"
@@ -6,6 +7,8 @@ import { TokenService } from "./token.service"
 import { v4 as uuidv4 } from 'uuid';
 import { confirmAccountMessage } from "../services/mailService/mail.messages"
 import { mailService } from "../services/mailService/mailer.service"
+import { AuthResponse } from "./query.types"
+
 
 export class UserService {
     async createUser(body: UserDto) {
@@ -23,13 +26,15 @@ export class UserService {
         const messageEmail = confirmAccountMessage(newGrabedUser.activate_link, newGrabedUser.email)
         await mailService.sendMail(newGrabedUser.email, 'Письмо для подтверждения аккаунта', messageEmail)
 
+        await db.query("INSERT INTO users_roles (user_id,role_id) VALUES ($1,$2)",[newGrabedUser.id,1])
 
         return newUser
     }
 
     async login(body: UserDto) {
         const validateUser = await this.checkLoginningUser(body)
-        const { refreshToken, accessToken } = await TokenService.createTokens(body)
+        const userDto:UserDto = {email:body.email,name:body.name,id:validateUser.id} 
+        const { refreshToken, accessToken } = await TokenService.createTokens(userDto)
         await TokenService.saveToken(validateUser.id, refreshToken)
 
 
@@ -39,20 +44,18 @@ export class UserService {
         return { refreshToken, accessToken, validateUser }
     }
 
-    async authUser(req, res) {
-        try {
+    async authUser(userId): Promise<AuthResponse> {
+        const candidate = await db.query("SELECT id,name,email,is_active,subscribers_count,activate_link FROM users WHERE id=$1", [userId])
 
-        } catch (e) {
-            console.log(e)
+        if (candidate.rowCount > 0) {
+            return candidate.rows[0]
+        } else {
+            throw ApiError.BadRequest('Что-то пошло не так')
         }
     }
 
-    async logOutUser(req, res) {
-        try {
-
-        } catch (e) {
-            console.log(e)
-        }
+    async logOutUser(refreshToken) {
+        await db.query("DELETE FROM token WHERE token=$1",[refreshToken])    
     }
 
     async checkUser(body: UserDto) {
@@ -107,6 +110,30 @@ export class UserService {
         } else {
             throw ApiError.BadRequest("Ошибка")
         }
+    }
+
+    async refreshUser(refreshToken: string) {
+        if (!refreshToken) {
+            throw ApiError.UnauthorizedError()
+        }
+
+        const validateToken = TokenService.validateToken(refreshToken)
+        const tokenFromDb = TokenService.findToken(refreshToken)
+
+        if (!validateToken || !tokenFromDb) {
+            throw ApiError.BadRequest("Что-то пошло не так")
+        }
+
+        const user = await db.query("SELECT * FROM users WHERE email=$1", [validateToken.email])
+        const { name, email, id } = user.rows[0]
+
+        const userDto: UserDto = { name, email }
+
+        const tokens = await TokenService.createTokens(userDto)
+
+        await TokenService.saveToken(id, tokens.refreshToken)
+
+        return { token: tokens.refreshToken, accessToken: tokens.accessToken }
     }
 }
 
